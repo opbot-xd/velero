@@ -406,7 +406,7 @@ func newDataDownload(
 	backup *velerov1api.Backup,
 	dataUploadResult *velerov2alpha1.DataUploadResult,
 	pvc *corev1api.PersistentVolumeClaim,
-	newNamespace, operationID string,
+	newNamespace, operationID, targetPVName string,
 ) *velerov2alpha1.DataDownload {
 	dataDownload := &velerov2alpha1.DataDownload{
 		TypeMeta: metav1.TypeMeta{
@@ -434,6 +434,7 @@ func newDataDownload(
 		Spec: velerov2alpha1.DataDownloadSpec{
 			TargetVolume: velerov2alpha1.TargetVolumeSpec{
 				PVC:       pvc.Name,
+				PV:        targetPVName,
 				Namespace: newNamespace,
 				FSType:    dataUploadResult.FSType,
 			},
@@ -465,16 +466,18 @@ func restoreFromDataUploadResult(
 		return nil, errors.Wrapf(err, "fail get DataUploadResult for restore: %s",
 			restore.Name)
 	}
-	pvc.Spec.VolumeName = ""
-	if pvc.Spec.Selector == nil {
-		pvc.Spec.Selector = &metav1.LabelSelector{}
-	}
-	if pvc.Spec.Selector.MatchLabels == nil {
-		pvc.Spec.Selector.MatchLabels = make(map[string]string)
-	}
-	pvc.Spec.Selector.MatchLabels[velerov1api.DynamicPVRestoreLabel] = label.
-		GetValidName(fmt.Sprintf("%s.%s.%s", newNamespace,
-			pvc.Name, utilrand.String(GenerateNameRandomLength)))
+
+	// Pre-generate a unique PV name and set it on the PVC so Kubernetes
+	// will not dynamically provision a PV. When the data mover later
+	// creates a PV with this exact name and a claimRef pointing to the
+	// PVC, Kubernetes binds them immediately.
+	//
+	// This replaces the previous spec.selector approach which is
+	// incompatible with multi-tenancy webhooks (e.g. Capsule) that
+	// block PVC creation when spec.selector is set.
+	targetPVName := label.GetValidName(
+		fmt.Sprintf("%s.%s.%s", newNamespace, pvc.Name, utilrand.String(GenerateNameRandomLength)))
+	pvc.Spec.VolumeName = targetPVName
 
 	dataDownload := newDataDownload(
 		restore,
@@ -483,6 +486,7 @@ func restoreFromDataUploadResult(
 		pvc,
 		newNamespace,
 		operationID,
+		targetPVName,
 	)
 	err = crClient.Create(ctx, dataDownload)
 	if err != nil {

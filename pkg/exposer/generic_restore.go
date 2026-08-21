@@ -91,6 +91,10 @@ type GenericRestoreRebindVolumeParam struct {
 	// TargetPVCName is the target volume name to be restored
 	TargetPVCName string
 
+	// TargetPVName is the pre-generated name for the target PV.
+	// When set, RebindPV uses this name instead of generating a new one.
+	TargetPVName string
+
 	// TargetNamespace is the namespace of the volume to be restored
 	TargetNamespace string
 
@@ -162,7 +166,7 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 
 	curLog.WithField("target PVC", param.TargetPVCName).WithField("selected node", selectedNode).Info("Target PVC is consumed")
 
-	if kube.IsPVCBound(targetPVC) {
+	if targetPVC.Status.Phase == corev1api.ClaimBound {
 		return errors.Errorf("Target PVC %s/%s has already been bound, abort", param.TargetNamespace, param.TargetPVCName)
 	}
 
@@ -521,7 +525,11 @@ func (e *genericRestoreExposer) rebindVolumeChangeMode(ctx context.Context, owne
 
 	retained = nil
 
-	rebindPV, err = kube.RebindPV(ctx, e.kubeClient.CoreV1(), uuid.NewString(), restorePV, targetPVC, orgReclaim, param.TargetFSType)
+	rebindPVName := uuid.NewString()
+	if param.TargetPVName != "" {
+		rebindPVName = param.TargetPVName
+	}
+	rebindPV, err = kube.RebindPV(ctx, e.kubeClient.CoreV1(), rebindPVName, restorePV, targetPVC, orgReclaim, param.TargetFSType)
 	if err != nil {
 		return errors.Wrapf(err, "error rebinding PV for target PVC %s", param.TargetPVCName)
 	}

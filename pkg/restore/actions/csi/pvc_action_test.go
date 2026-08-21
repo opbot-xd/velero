@@ -359,6 +359,7 @@ func TestCancel(t *testing.T) {
 			err = pvcRIA.crClient.Get(t.Context(), crclient.ObjectKey{Namespace: tc.dataDownload.Namespace, Name: tc.dataDownload.Name}, resultDataDownload)
 			require.NoError(t, err)
 
+			resultDataDownload.Spec.TargetVolume.PV = tc.expectedDataDownload.Spec.TargetVolume.PV
 			require.Empty(t, cmp.Diff(tc.expectedDataDownload, *resultDataDownload, cmpopts.IgnoreFields(velerov2alpha1.DataDownload{}, "TypeMeta", "ResourceVersion", "Name")))
 		})
 	}
@@ -546,12 +547,14 @@ func TestExecute(t *testing.T) {
 					require.Equal(t, "volumesnapshots.snapshot.storage.k8s.io", output.AdditionalItems[0].GroupResource.String())
 					require.Equal(t, "vsName", output.AdditionalItems[0].Name)
 				}
-				if pvc.Spec.Selector != nil && pvc.Spec.Selector.MatchLabels != nil {
-					// This is used for long name and namespace case.
+				if tc.expectedDataDownload != nil {
+					// When DataDownload is expected, the PVC should have a pre-generated VolumeName
+					// (instead of spec.selector) to avoid conflicts with multi-tenancy webhooks.
+					require.NotEmpty(t, pvc.Spec.VolumeName)
 					if len(tc.pvc.Namespace+"."+tc.pvc.Name) >= validation.DNS1035LabelMaxLength {
-						require.Contains(t, pvc.Spec.Selector.MatchLabels[velerov1api.DynamicPVRestoreLabel], label.GetValidName(tc.pvc.Namespace + "." + tc.pvc.Name)[:56])
+						require.Contains(t, pvc.Spec.VolumeName, label.GetValidName(tc.pvc.Namespace + "." + tc.pvc.Name)[:56])
 					} else {
-						require.Contains(t, pvc.Spec.Selector.MatchLabels[velerov1api.DynamicPVRestoreLabel], tc.pvc.Namespace+"."+tc.pvc.Name)
+						require.Contains(t, pvc.Spec.VolumeName, tc.pvc.Namespace+"."+tc.pvc.Name)
 					}
 				}
 			}
@@ -561,7 +564,10 @@ func TestExecute(t *testing.T) {
 					LabelSelector: labels.SelectorFromSet(tc.expectedDataDownload.Labels),
 				})
 				require.NoError(t, err)
-				require.Empty(t, cmp.Diff(tc.expectedDataDownload, &dataDownloadList.Items[0], cmpopts.IgnoreFields(velerov2alpha1.DataDownload{}, "TypeMeta", "ResourceVersion", "Name")))
+				dd := dataDownloadList.Items[0]
+				require.NotEmpty(t, dd.Spec.TargetVolume.PV, "TargetVolume.PV should be pre-generated")
+				dd.Spec.TargetVolume.PV = tc.expectedDataDownload.Spec.TargetVolume.PV
+				require.Empty(t, cmp.Diff(tc.expectedDataDownload, &dd, cmpopts.IgnoreFields(velerov2alpha1.DataDownload{}, "TypeMeta", "ResourceVersion", "Name")))
 			}
 		})
 	}

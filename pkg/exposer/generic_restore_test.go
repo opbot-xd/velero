@@ -89,6 +89,9 @@ func TestRestoreExpose(t *testing.T) {
 		Spec: corev1api.PersistentVolumeClaimSpec{
 			VolumeName: "fake-pv",
 		},
+		Status: corev1api.PersistentVolumeClaimStatus{
+			Phase: corev1api.ClaimBound,
+		},
 	}
 
 	daemonSet := &appsv1api.DaemonSet{

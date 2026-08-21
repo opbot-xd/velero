@@ -478,6 +478,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	objRef := getDataDownloadOwnerObject(&dd)
 	err := r.restoreExposer.RebindVolume(ctx, objRef, exposer.GenericRestoreRebindVolumeParam{
 		TargetPVCName:    dd.Spec.TargetVolume.PVC,
+		TargetPVName:     dd.Spec.TargetVolume.PV,
 		TargetNamespace:  dd.Spec.TargetVolume.Namespace,
 		OperationTimeout: dd.Spec.OperationTimeout.Duration,
 		TargetFSType:     dd.Spec.TargetVolume.FSType,
