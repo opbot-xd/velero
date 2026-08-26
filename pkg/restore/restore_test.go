@@ -233,7 +233,7 @@ func TestRestorePVWithVolumeInfo(t *testing.T) {
 			for _, r := range tc.apiResources {
 				h.DiscoveryClient.WithAPIResource(r)
 			}
-			require.NoError(t, h.restorer.discoveryHelper.Refresh())
+			require.NoError(t, h.discoveryHelper.Refresh())
 
 			data := &Request{
 				Log:                 h.log,
@@ -786,7 +786,7 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			for _, r := range tc.apiResources {
 				h.DiscoveryClient.WithAPIResource(r)
 			}
-			require.NoError(t, h.restorer.discoveryHelper.Refresh())
+			require.NoError(t, h.discoveryHelper.Refresh())
 
 			// We need to fetch the policies using the actual function
 			resPolicies, err := resourcepolicies.GetResourcePoliciesFromRestore(t.Context(), tc.restore, h.restorer.kbClient, h.log)
@@ -866,7 +866,7 @@ func TestRestoreMustHaveResourceNamespaceEnforcement(t *testing.T) {
 			for _, r := range tc.apiResources {
 				h.DiscoveryClient.WithAPIResource(r)
 			}
-			require.NoError(t, h.restorer.discoveryHelper.Refresh())
+			require.NoError(t, h.discoveryHelper.Refresh())
 
 			resPolicies, err := resourcepolicies.GetResourcePoliciesFromRestore(t.Context(), tc.restore, h.restorer.kbClient, h.log)
 			require.NoError(t, err)
@@ -952,7 +952,7 @@ func TestRestoreNamespaceMapping(t *testing.T) {
 			for _, r := range tc.apiResources {
 				h.DiscoveryClient.WithAPIResource(r)
 			}
-			require.NoError(t, h.restorer.discoveryHelper.Refresh())
+			require.NoError(t, h.discoveryHelper.Refresh())
 
 			data := &Request{
 				Log:              h.log,
@@ -1036,7 +1036,7 @@ func TestRestoreResourcePriorities(t *testing.T) {
 		for _, r := range tc.apiResources {
 			h.DiscoveryClient.WithAPIResource(r)
 		}
-		require.NoError(t, h.restorer.discoveryHelper.Refresh())
+		require.NoError(t, h.discoveryHelper.Refresh())
 
 		data := &Request{
 			Log:              h.log,
@@ -1113,7 +1113,7 @@ func TestInvalidTarballContents(t *testing.T) {
 			for _, r := range tc.apiResources {
 				h.DiscoveryClient.WithAPIResource(r)
 			}
-			require.NoError(t, h.restorer.discoveryHelper.Refresh())
+			require.NoError(t, h.discoveryHelper.Refresh())
 
 			data := &Request{
 				Log:              h.log,
@@ -4367,10 +4367,10 @@ func assertNonEmptyResults(t *testing.T, typeMsg string, res ...Result) {
 }
 
 type harness struct {
-	*test.APIServer
-
-	restorer *kubernetesRestorer
-	log      logrus.FieldLogger
+	*test.Harness
+	discoveryHelper discovery.Helper
+	restorer        *kubernetesRestorer
+	log             logrus.FieldLogger
 }
 
 func newHarness(t *testing.T) *harness {
@@ -4380,13 +4380,14 @@ func newHarness(t *testing.T) *harness {
 	log := logrus.StandardLogger()
 	kbClient := test.NewFakeControllerRuntimeClient(t)
 
-	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
+	dh, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
 	require.NoError(t, err)
 
 	return &harness{
-		APIServer: apiServer,
+		Harness:         test.NewHarness(t, apiServer),
+		discoveryHelper: dh,
 		restorer: &kubernetesRestorer{
-			discoveryHelper:            discoveryHelper,
+			discoveryHelper:            dh,
 			dynamicFactory:             client.NewDynamicFactory(apiServer.DynamicClient),
 			namespaceClient:            apiServer.KubeClient.CoreV1().Namespaces(),
 			resourceTerminatingTimeout: time.Minute,
@@ -4405,28 +4406,7 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) AddItems(t *testing.T, resource *test.APIResource) {
 	t.Helper()
-
-	h.DiscoveryClient.WithAPIResource(resource)
-	require.NoError(t, h.restorer.discoveryHelper.Refresh())
-
-	for _, item := range resource.Items {
-		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
-		require.NoError(t, err)
-
-		unstructuredObj := &unstructured.Unstructured{Object: obj}
-
-		// These fields have non-nil zero values in the unstructured objects. We remove
-		// them to make comparison easier in our tests.
-		unstructured.RemoveNestedField(unstructuredObj.Object, "metadata", "creationTimestamp")
-		unstructured.RemoveNestedField(unstructuredObj.Object, "status")
-
-		if resource.Namespaced {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Namespace(item.GetNamespace()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		} else {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		}
-		require.NoError(t, err)
-	}
+	h.Harness.AddResource(t, h.discoveryHelper, resource)
 }
 
 func Test_resetVolumeBindingInfo(t *testing.T) {
